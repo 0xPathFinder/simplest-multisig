@@ -1,7 +1,7 @@
 //SPDX-License-Identifier: MIT 
 pragma solidity 0.8.0; 
  
-contract MultiSig{ 
+contract PrimitiveMultiSig{ 
  
     mapping(address => bool) public isOwner; 
  
@@ -61,7 +61,7 @@ contract MultiSig{
     function secondOwnerApprove() public onlySecondOwner { 
         require(numbersOfConfirmation == 1, "NOT CONFIRMED BY ownerNumberOne YET"); 
         ++numbersOfConfirmation; 
-        timeLeft = currentTime() + 60; 
+        timeLeft = currentTime() + 43200; 
         emit secondOwnerApproved(msg.sender); 
     } 
  
