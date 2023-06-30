@@ -1,14 +1,16 @@
 //SPDX-License-Identifier: MIT 
 pragma solidity 0.8.0; 
  
-contract SimplestMultiSig{ 
+contract MultiSig{ 
  
     mapping(address => bool) public isOwner; 
  
     uint public numbersOfConfirmation = 0; 
  
-    address ownerNumberOne;
-    address ownerNumberTwo;
+    uint public timeLeft; 
+ 
+    address ownerNumberOne; 
+    address ownerNumberTwo;  
  
     modifier onlyFirstOwner() { 
         require(msg.sender == ownerNumberOne, "NOT ownerNumberOne"); 
@@ -39,12 +41,17 @@ contract SimplestMultiSig{
         return address(this).balance; 
     } 
  
+    function currentTime() public view returns(uint) { 
+        return block.timestamp; // 43200 = 12 hours 
+    } 
+ 
     function firstOwnerApprove() public onlyFirstOwner { 
+        require(numbersOfConfirmation == 0,"ALREADY CONFIRMED BY ownerNumberOne"); 
         ++numbersOfConfirmation; 
         emit firstOwnerApproved(msg.sender); 
     } 
  
-    function revokeFirstOwnerApprove() public  onlyFirstOwner{ 
+    function revokeFirstOwnerApprove() public onlyFirstOwner{ 
         if (numbersOfConfirmation == 1) { 
             --numbersOfConfirmation; 
         } 
@@ -54,6 +61,7 @@ contract SimplestMultiSig{
     function secondOwnerApprove() public onlySecondOwner { 
         require(numbersOfConfirmation == 1, "NOT CONFIRMED BY ownerNumberOne YET"); 
         ++numbersOfConfirmation; 
+        timeLeft = currentTime() + 60; 
         emit secondOwnerApproved(msg.sender); 
     } 
  
@@ -64,12 +72,16 @@ contract SimplestMultiSig{
         emit revokeSecondOwnerApproved(msg.sender); 
     } 
  
-    function approved(address payable _destination, uint _amount) external { 
+    function withdrawn(address payable _destination, uint _amount) external { 
         require(msg.sender == ownerNumberOne || msg.sender == ownerNumberTwo, "NOT AN OWNER"); 
         require(numbersOfConfirmation == 2, "TWO CONFIRMATIONS REQUIRED"); 
-        _destination.transfer(_amount); 
+ 
+        if (currentTime() < timeLeft) { 
+            _destination.transfer(_amount); 
+            emit Withdrawn(msg.sender, _amount); 
+        } 
         numbersOfConfirmation = 0; 
-        emit Withdrawn(msg.sender, _amount); 
+        timeLeft = 0; 
     } 
  
     receive() external payable{ 
