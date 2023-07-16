@@ -1,1 +1,1 @@
-# simplest-multisig
+# simplified-multisig
