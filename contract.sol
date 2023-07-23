@@ -1,91 +1,145 @@
 //SPDX-License-Identifier: MIT 
 pragma solidity 0.8.0; 
  
-contract PrimitiveMultiSig{ 
- 
+contract Multisig{ 
+
+    uint public requiredConfirmations;
+    address admin;
+    uint txID;
+    uint ownerSize;
+    uint numOfAddresses;
+    address second;
+    bool isCreateTxIdCalled;
+    address[] addresses;
+
     mapping(address => bool) public isOwner; 
+    mapping(address => bool) public isConfirmedBy; 
+    mapping(uint => uint) public currentNumConfirmations; 
+    mapping(uint => Transactions) public executedTransactions; 
  
-    uint public numbersOfConfirmation = 0; 
+    event Deposit(address indexed _from, uint indexed _value, uint indexed _at); 
+    event Confirmed(address indexed _from);
+    event Revoked(address indexed _from);
+    event Withdrawn(address indexed _to, uint indexed _value, uint indexed _at); 
  
-    uint public timeLeft; 
+    struct Transactions { 
+        address to; 
+        uint amount; 
+        uint time; 
+    }
  
-    address ownerNumberOne; 
-    address ownerNumberTwo;  
- 
-    modifier onlyFirstOwner() { 
-        require(msg.sender == ownerNumberOne, "NOT ownerNumberOne"); 
+    modifier onlyAdmin() { 
+        require(msg.sender == admin, "Not Admin"); 
         _; 
     } 
  
-    modifier onlySecondOwner() { 
-        require(msg.sender == ownerNumberTwo, "NOT ownerNumberTwo"); 
+    modifier ownersORadmin(address _owner) { 
+        require(isOwner[_owner] || msg.sender == admin, "Address is not owner nor admin"); 
         _; 
     } 
  
-    event firstOwnerApproved(address indexed _firstOwnerEvent); 
-    event secondOwnerApproved(address indexed _secondOwnerEvent); 
-    event revokeFirstOwnerApproved(address indexed _firstOwnerEvent); 
-    event revokeSecondOwnerApproved(address indexed _secondOwnerEvent); 
-    event Deposit(address indexed _fromEvent); 
-    event Withdrawn(address indexed _destinationEvent, uint _amountEvent); 
+    constructor(address _owner) { 
+        require(msg.sender != _owner, "Cannot be the same"); 
+        admin = msg.sender; 
+        second = _owner; 
+        isOwner[_owner] = true; 
  
-    constructor(address _confirmedOwnerNumberOne, address _confirmedOwnerNumberTwo){ 
-        ownerNumberOne = _confirmedOwnerNumberOne; 
-        ownerNumberTwo = _confirmedOwnerNumberTwo; 
-        require(_confirmedOwnerNumberOne != _confirmedOwnerNumberTwo, "CANNOT BE SAME OWNER"); 
-        isOwner[_confirmedOwnerNumberOne] = true; 
-        isOwner[_confirmedOwnerNumberTwo] = true; 
+        requiredConfirmations = 2; 
+        ownerSize = 2; // initial size of owners is 2 (admin + second declared on constructor)
     } 
  
-    function getBalance() public view returns(uint){ 
-        return address(this).balance; 
+    function changeNumConfirmations(uint _requiredConfirmations) external onlyAdmin { 
+        require(_requiredConfirmations != requiredConfirmations, "Already that number of confirmations"); 
+        requiredConfirmations = _requiredConfirmations; 
+        require(requiredConfirmations >= 2 && requiredConfirmations <= ownerSize, "Number of confirmations should be between two and number of owners"); 
     } 
  
-    function currentTime() public view returns(uint) { 
-        return block.timestamp; // 43200 = 12 hours 
+    function addOwner(address _owner) external onlyAdmin {
+        require(!isOwner[_owner], "Owner already exist");
+        require(ownerSize <= 9, "The maximum number of owners is nine");
+        //require(!isConfirmedBy[_owner], "Already confirmed"); // seems inapropriate
+        isOwner[_owner] = true;
+        addresses.push(_owner);
+        numOfAddresses++;
+        ownerSize++;
+    }
+ 
+    function removeOwner(address _owner) external onlyAdmin {
+        require(_owner != second, "This address cannot be removed");
+        require(isOwner[_owner], "Owner not exist");
+        isOwner[_owner] = false;
+        // need to remove here from addresses[]
+        //addresses.pop();
+
+        for(uint i = 0; i < numOfAddresses; i++){
+            
+        }
+
+        numOfAddresses--;
+        ownerSize--;
+         
+        requiredConfirmations = ownerSize; 
     } 
  
-    function firstOwnerApprove() public onlyFirstOwner { 
-        require(numbersOfConfirmation == 0,"ALREADY CONFIRMED BY ownerNumberOne"); 
-        ++numbersOfConfirmation; 
-        emit firstOwnerApproved(msg.sender); 
+    function getBalance() external view returns(uint) { 
+        return address(this).balance;
+    }
+
+    function createTxID() external onlyAdmin returns(uint) {
+        require(!isCreateTxIdCalled, "Only one txID can be created");
+        txID = uint(keccak256(abi.encodePacked(block.timestamp)));
+        isCreateTxIdCalled = true;
+        return txID;
+    }
+
+    function confirm() external ownersORadmin(msg.sender) { 
+        require(!isConfirmedBy[msg.sender],"Already confirmed"); // gives an error for second time withdrawing
+        require(isCreateTxIdCalled == true, "Cannot be called without 'createTxID' at first");
+        isConfirmedBy[msg.sender] = true;
+        currentNumConfirmations[txID]++;
+ 
+        emit Confirmed(msg.sender); 
     } 
+
+    function revoke() external ownersORadmin(msg.sender) { 
+        require(isConfirmedBy[msg.sender], "Not confirmed yet"); 
+        isConfirmedBy[msg.sender] = false; 
+        currentNumConfirmations[txID]--; 
+
+        emit Revoked(msg.sender);
+    }
+
+    // need to find a way for isConfirmedBy and currentNumConfirmations resetting
+    function withdrawn(address _to, uint _amount) external payable onlyAdmin { 
+        require(currentNumConfirmations[txID] == requiredConfirmations, "Not the required number of confirmations"); 
  
-    function revokeFirstOwnerApprove() public onlyFirstOwner{ 
-        if (numbersOfConfirmation == 1) { 
-            --numbersOfConfirmation; 
-        } 
-        emit revokeFirstOwnerApproved(msg.sender); 
+        (bool success, ) = _to.call{value: _amount}(""); 
+        require(success, "Transaction execution failed");
+ 
+        executedTransactions[txID] = Transactions( 
+            { 
+                to: _to, 
+                amount: _amount, 
+                time: block.timestamp 
+            }
+        );
+
+        isCreateTxIdCalled = false;
+        currentNumConfirmations[txID] = 0;
+        isConfirmedBy[admin] = false; // works only for admin
+        isConfirmedBy[second] = false;
+
+       for(uint i = 0; i < numOfAddresses; i++){
+            isConfirmedBy[addresses[i]] = false;
+        }
+
+        numOfAddresses = 0;
+
+        emit Withdrawn(_to, _amount, block.timestamp); 
     } 
- 
-    function secondOwnerApprove() public onlySecondOwner { 
-        require(numbersOfConfirmation == 1, "NOT CONFIRMED BY ownerNumberOne YET"); 
-        ++numbersOfConfirmation; 
-        timeLeft = currentTime() + 43200; 
-        emit secondOwnerApproved(msg.sender); 
-    } 
- 
-    function revokeSecondOwnerApprove() public onlySecondOwner { 
-        if (numbersOfConfirmation == 2) { 
-            --numbersOfConfirmation; 
-        } 
-        emit revokeSecondOwnerApproved(msg.sender); 
-    } 
- 
-    function withdrawn(address payable _destination, uint _amount) external { 
-        require(msg.sender == ownerNumberOne || msg.sender == ownerNumberTwo, "NOT AN OWNER"); 
-        require(numbersOfConfirmation == 2, "TWO CONFIRMATIONS REQUIRED"); 
- 
-        if (currentTime() < timeLeft) { 
-            _destination.transfer(_amount); 
-            emit Withdrawn(msg.sender, _amount); 
-        } 
-        numbersOfConfirmation = 0; 
-        timeLeft = 0; 
-    } 
- 
-    receive() external payable{ 
-        emit Deposit(msg.sender); 
-    } 
- 
+
+    receive() external payable { 
+        emit Deposit(msg.sender, msg.value, block.timestamp); 
+    }
+
 }
